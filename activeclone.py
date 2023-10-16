@@ -109,6 +109,7 @@ try:
             frame = cameras[active_monitor].grab()  # grab frame from active_monitor 
             cursor = cameras[active_monitor].grab_cursor() 
 
+            #detach cursor and frame handling?
             if frame is not None: 
                 frame_height,frame_width,_ = frame.shape #rotated
                 #todo, adjust output to input resolution, untested code
@@ -118,14 +119,6 @@ try:
                 monitorinfo = get_monitor_info(monitor_id)
                 monitor_width = monitorinfo.rcMonitor.right - monitorinfo.rcMonitor.left
                 monitor_height = monitorinfo.rcMonitor.bottom - monitorinfo.rcMonitor.top
-
-                # Calculate the cursor position relative to the active monitor's top/left
-                cursor_x = mouse_pos.x - monitorinfo.rcMonitor.left
-                cursor_y = mouse_pos.y - monitorinfo.rcMonitor.top
-                
-                #todo Scale position to surface
-                #print(window.get_size())
-                #print(frame_width, frame_height)
 
                 # Create a pygame surface from the frame
                 #frame_surface = pygame.surfarray.make_surface(frame.transpose(1, 0, 2)) #slow
@@ -138,7 +131,12 @@ try:
                     window.blit(text_surface, (3,15))
                 
                 #draw cursor?
-                if cursor.PointerPositionInfo.Visible == True & mouse_visible == True:
+                if  mouse_visible == True:
+                    # Calculate the cursor position relative to the active monitor's top/left
+                    #cursor_x = mouse_pos.x - monitorinfo.rcMonitor.left
+                    #cursor_y = mouse_pos.y - monitorinfo.rcMonitor.top
+                    cursor_x = cursor.PointerPositionInfo.Position.x
+                    cursor_y = cursor.PointerPositionInfo.Position.y
                     try:
                         if cursor.Shape is not None:
                             #DXGI_OUTDUPL_POINTER_SHAPE_TYPE 
@@ -153,7 +151,6 @@ try:
                         pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
                         print("cursor error:",e)
 
-                #window.blit(frame_surface, (0, 0)) #when using make_surface
                 pygame.display.flip()               
                 clock.tick(fpslimit)
 
