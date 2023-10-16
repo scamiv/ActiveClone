@@ -39,12 +39,12 @@ def queryMousePosition_ctypes():
     windll.user32.GetCursorPos(byref(pt))
     return pt
 
-def queryMousePosition_win32gui():
+def GetCursorInfo_win32gui():
     pt = POINT()
     flags, hcursor, (x,y) = win32gui.GetCursorInfo()
     pt.x = x
     pt.y = y
-    return pt
+    return pt, True if flags == 1 else False
  
 @cache
 def monitor_id_from_hmonitor (hmonitor):
@@ -101,7 +101,7 @@ cursor = ac_Cursor()
 try:
     while True:
         # Get the current cursor position to determine the active monitor
-        mouse_pos = queryMousePosition_ctypes()
+        mouse_pos, mouse_visible = GetCursorInfo_win32gui()
         monitor_id = windll.user32.MonitorFromPoint(mouse_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle
         active_monitor = monitor_id_from_hmonitor(monitor_id)
 
@@ -111,7 +111,7 @@ try:
 
             if frame is not None: 
                 frame_height,frame_width,_ = frame.shape #rotated
-                #todo, adjust output to input resolutionQ
+                #todo, adjust output to input resolution, untested code
                 if (frame_width, frame_height) != window.get_size():
                     window = pygame.display.set_mode((frame_width, frame_height), pygame.NOFRAME | pygame.HWSURFACE , display=output_display,vsync=0)
 
@@ -119,11 +119,11 @@ try:
                 monitor_width = monitorinfo.rcMonitor.right - monitorinfo.rcMonitor.left
                 monitor_height = monitorinfo.rcMonitor.bottom - monitorinfo.rcMonitor.top
 
-                # Calculate the cursor position relative to the active monitor's top/left, TODO: DXGI_OUTDUPL_POINTER_POSITION should give the right value
+                # Calculate the cursor position relative to the active monitor's top/left
                 cursor_x = mouse_pos.x - monitorinfo.rcMonitor.left
                 cursor_y = mouse_pos.y - monitorinfo.rcMonitor.top
                 
-                #todo Scale position to surface?
+                #todo Scale position to surface
                 #print(window.get_size())
                 #print(frame_width, frame_height)
 
@@ -137,24 +137,22 @@ try:
                     text_surface = font.render(str(int(clock.get_fps())), True, "White")
                     window.blit(text_surface, (3,15))
                 
-                #draw cursor
-                try:
-                    #print(cursor)
-                    if cursor.Shape is not None:
-                        #scursor = pygame.image.frombytes(bytes(cursor),(32,32),"RGBA",False)
-                        #DXGI_OUTDUPL_POINTER_SHAPE_TYPE 
-                        if cursor.PointerShapeInfo.Type == 1: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME
-                            #todo
-                            scursor = None
-                        elif cursor.PointerShapeInfo.Type == 2: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR
-                            scursor = pygame.image.frombuffer(cursor.Shape,(cursor.PointerShapeInfo.Width , cursor.PointerShapeInfo.Height),"BGRA")
-                            window.blit(scursor, (cursor_x,cursor_y))
-                except Exception as e:
-                    # Draw "cursor"
-                    pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
-                    print("cursor error:",e)
+                #draw cursor?
+                if cursor.PointerPositionInfo.Visible == True & mouse_visible == True:
+                    try:
+                        if cursor.Shape is not None:
+                            #DXGI_OUTDUPL_POINTER_SHAPE_TYPE 
+                            if cursor.PointerShapeInfo.Type == 1: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME
+                                #todo
+                                scursor = None
+                            elif cursor.PointerShapeInfo.Type == 2: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR
+                                scursor = pygame.image.frombuffer(cursor.Shape,(cursor.PointerShapeInfo.Width , cursor.PointerShapeInfo.Height),"BGRA")
+                                window.blit(scursor, (cursor_x,cursor_y))
+                    except Exception as e:
+                        # Draw "cursor"
+                        pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
+                        print("cursor error:",e)
 
-                #Display
                 #window.blit(frame_surface, (0, 0)) #when using make_surface
                 pygame.display.flip()               
                 clock.tick(fpslimit)
