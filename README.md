@@ -12,12 +12,12 @@ utilizes DesktopDuplicationAPI via DXCam
 I had been using a SteamLink as a KVM and got quite used to this feature. ActiveClone emulates its behavior on an extended KVM screen, providing a convenient way to interact with all your desktops on multiple monitor setups.
 
 ## Getting Started
-adjust settings in activeclone.py
 ```
-#settings
-output_display = 1
-fpslimit=60
-show_fps=True;
+usage: activeclone.py [-h] [--display DISPLAY] [--fps FPS] [-show_fps]
+options:
+  --display DISPLAY  Output display number
+  --fps FPS          FPS limit (Default 60)
+  --show_fps          Show FPS
 ```
 
 ## State of Project

@@ -1,7 +1,13 @@
 import sys
+
 sys.path.append('dxcam_git') #fixme
 import dxcam
+from dxcam._libs.dxgi import *
+
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 import pygame
+
 import re
 import win32gui
 import win32con
@@ -10,15 +16,11 @@ import traceback
 import numpy as np
 
 from ctypes import windll, Structure, c_ulong, c_wchar, byref,c_long, sizeof
-from ctypes.wintypes import RECT
+from ctypes.wintypes import RECT, POINT
     
 from functools import cache
-from dxcam._libs.dxgi import *
 
-#settings
-output_display = 1
-fpslimit=60
-show_fps=True;
+import argparse
 
 class MONITORINFOEXW(Structure):
     _fields_ = [
@@ -33,14 +35,6 @@ class MONITORINFOEXW(Structure):
 MONITOR_DEFAULTTONULL = 0
 MONITOR_DEFAULTTOPRIMARY = 1
 MONITOR_DEFAULTTONEAREST = 2
-
-class POINT(Structure):
-    _fields_ = [("x", c_long), ("y", c_long)]
-
-def queryMousePosition_ctypes():
-    pt = POINT()
-    windll.user32.GetCursorPos(byref(pt))
-    return pt
 
 def GetCursorInfo_win32gui():
     pt = POINT()
@@ -88,28 +82,44 @@ def convert_monochrome_to_rgba(input, width, height):
             rgba_output[i] = [255, 255, 255, 255] #"inverted"
     return rgba_output
 
-output_info = dxcam.output_info() #add proper output...
-pattern = r'Device\[(\d+)\] Output\[(\d+)\]: szDevice\[(.+?)\]: Res:\((\d+), (\d+)\) Rot:\d+ Primary:(\w+)'
-monitor_info = re.findall(pattern, output_info)
+def build_monitors(dxcam_output_info):
+    pattern = r'Device\[(\d+)\] Output\[(\d+)\]: szDevice\[(.+?)\]: Res:\((\d+), (\d+)\) Rot:\d+ Primary:(\w+)'
+    monitor_info = re.findall(pattern, dxcam_output_info)
+    r= []
+    for match in monitor_info:
+        device_idx = int(match[0])
+        output_idx = int(match[1])
+        szDevice = match[2]
+        width = int(match[3])
+        height = int(match[4])
+        is_primary = match[5] == 'True'
+        r.append((device_idx, output_idx, szDevice, width, height, is_primary))
+    return r
 
-monitors = []
-for match in monitor_info:
-    device_idx = int(match[0])
-    output_idx = int(match[1])
-    szDevice = match[2]
-    width = int(match[3])
-    height = int(match[4])
-    is_primary = match[5] == 'True'
-    monitors.append((device_idx, output_idx, szDevice, width, height, is_primary))
+monitors = build_monitors(dxcam.output_info())
 print(*enumerate(monitors), sep='\n')
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--display", type=int, default=1, help="Output display number")
+parser.add_argument("--fps", type=int, default=60, help="FPS limit (Default 60)")
+parser.add_argument("--show_fps", action="store_true", help="Show FPS")
+args = parser.parse_args()
+parser.print_help()
+
+output_display = args.display
+fpslimit = args.fps
+show_fps = args.show_fps
 
 # setup pygame/window
 pygame.init()
-window = pygame.display.set_mode((0, 0), pygame.NOFRAME | pygame.HWSURFACE , display=output_display,vsync=0)
+#pygameFlags = pygame.NOFRAME | pygame.OPENGL | pygame.FULLSCREEN | pygame.SCALED
+pygameFlags = pygame.NOFRAME | pygame.HWSURFACE| pygame.FULLSCREEN | pygame.SCALED 
+window = pygame.display.set_mode((monitors[output_display][3], monitors[output_display][4]), pygameFlags , display=output_display,vsync=0)
 win32gui.SetWindowPos(pygame.display.get_wm_info()['window'], win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 clock = pygame.time.Clock()
 pygame.font.init()
 font = pygame.font.SysFont('lucidaconsole', 10)
+
 
 # Initialize dxcam for each display
 cameras = []
@@ -120,8 +130,8 @@ for device_idx, output_idx, _, _, _, _ in monitors:
 try:
     while True:
         # Get the current cursor position to determine the active monitor
-        mouse_pos, mouse_visible = GetCursorInfo_win32gui()
-        monitor_id = windll.user32.MonitorFromPoint(mouse_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle
+        cursor_pos, cursor_visible = GetCursorInfo_win32gui()
+        monitor_id = windll.user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle
         active_monitor = monitor_id_from_hmonitor(monitor_id)
 
         if active_monitor is not None:
@@ -131,9 +141,10 @@ try:
             #detach cursor and frame handling?
             if frame is not None: 
                 frame_height,frame_width,_ = frame.shape #rotated
-                #todo, adjust output to input resolution, untested code
+       
+                #works but only with nearest scaling, maybe use opengl?
                 if (frame_width, frame_height) != window.get_size():
-                    window = pygame.display.set_mode((frame_width, frame_height), pygame.NOFRAME | pygame.HWSURFACE , display=output_display,vsync=0)
+                    window = pygame.display.set_mode((frame_width, frame_height), pygameFlags , display=output_display,vsync=0)
 
                 monitorinfo = get_monitor_info(monitor_id)
                 monitor_width = monitorinfo.rcMonitor.right - monitorinfo.rcMonitor.left
@@ -150,10 +161,10 @@ try:
                     window.blit(text_surface, (3,15))
                 
                 #draw cursor?
-                if  mouse_visible == True:
+                if  cursor_visible == True:
                     # Calculate the cursor position relative to the active monitor's top/left
-                    #cursor_x = mouse_pos.x - monitorinfo.rcMonitor.left
-                    #cursor_y = mouse_pos.y - monitorinfo.rcMonitor.top
+                    #cursor_x = cursor_pos.x - monitorinfo.rcMonitor.left
+                    #cursor_y = cursor_pos.y - monitorinfo.rcMonitor.top
                     cursor_x = cursor.PointerPositionInfo.Position.x
                     cursor_y = cursor.PointerPositionInfo.Position.y
                     try:
