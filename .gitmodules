@@ -1,3 +1,4 @@
 [submodule "dxcam_git"]
 	path = dxcam_git
 	url = https://github.com/scamiv/DXcam
+	branch = main
