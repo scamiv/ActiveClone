@@ -3,7 +3,7 @@ Dynamic Multi-Monitor Desktop Cloning. Clone active monitor to Borderless Fullsc
 
 ActiveClone is a dynamic multi-monitor desktop cloning tool that enables you to create a fullscreen window on a specified display, which mirrors the screen where the mouse cursor is located. This results in a "dynamic clone" of a multi-monitor setup where the output screen automatically follows the cursor.
 
-#utilizes DesktopDuplicationAPI through DXCam
+utilizes DesktopDuplicationAPI via DXCam
  https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api
  https://github.com/ra1nty/DXcam
  https://github.com/AI-M-BOT/DXcam/
@@ -23,4 +23,4 @@ show_fps=True;
 ## State of Project
 
 This is a first hacky implementation that currently fully works for my use case. However, it's important to note that the project's future is uncertain. Contributions and support from the community are welcome.
-While the core functionality is operational, cursor image handling is very hacky and only supports bitmap type cursors.
+While the core functionality is operational, cursor image handling is hacky and does not support DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR type cursors.
