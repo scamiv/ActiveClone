@@ -6,6 +6,9 @@ import re
 import win32gui
 import win32con
 
+import traceback
+import numpy as np
+
 from ctypes import windll, Structure, c_ulong, c_wchar, byref,c_long, sizeof
 from ctypes.wintypes import RECT
     
@@ -64,13 +67,30 @@ def get_monitor_info(monitor_id):
     windll.user32.GetMonitorInfoW(monitor_id, byref(monitorinfo))
     return monitorinfo   
 
-# Initialize Pygame
-pygame.init()
+def convert_monochrome_to_rgba(input, width, height):
+    rgba_output = np.zeros((width * height, 4), dtype=np.uint8)
+    length = (width * height)
+    for i in range(length):
+        byte_index = i // 8
+        xor_index = (i+length) // 8
+        bit_position = 7 - (i % 8)
+        and_val = (input[byte_index] >> bit_position) & 1
+        xor_val = (input[xor_index] >> bit_position) & 1
+
+        #fixme
+        if and_val == 0 and xor_val == 0:
+            rgba_output[i] = [0, 0, 0, 255]
+        elif and_val == 0 and xor_val == 1:  
+            rgba_output[i] = [255, 255, 255, 255]
+        elif and_val == 1 and xor_val == 0:  
+            rgba_output[i] = [0, 0, 0, 0]
+        elif and_val == 1 and xor_val == 1:  
+            rgba_output[i] = [255, 255, 255, 255] #"inverted"
+    return rgba_output
 
 output_info = dxcam.output_info() #add proper output...
 pattern = r'Device\[(\d+)\] Output\[(\d+)\]: szDevice\[(.+?)\]: Res:\((\d+), (\d+)\) Rot:\d+ Primary:(\w+)'
 monitor_info = re.findall(pattern, output_info)
-
 
 monitors = []
 for match in monitor_info:
@@ -84,6 +104,7 @@ for match in monitor_info:
 print(*enumerate(monitors), sep='\n')
 
 # setup pygame/window
+pygame.init()
 window = pygame.display.set_mode((0, 0), pygame.NOFRAME | pygame.HWSURFACE , display=output_display,vsync=0)
 win32gui.SetWindowPos(pygame.display.get_wm_info()['window'], win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 clock = pygame.time.Clock()
@@ -96,8 +117,6 @@ for device_idx, output_idx, _, _, _, _ in monitors:
     camera = dxcam.create(device_idx=device_idx, output_idx=output_idx, output_color="BGRA")
     cameras.append(camera)
 
-
-cursor = ac_Cursor()
 try:
     while True:
         # Get the current cursor position to determine the active monitor
@@ -141,15 +160,19 @@ try:
                         if cursor.Shape is not None:
                             #DXGI_OUTDUPL_POINTER_SHAPE_TYPE 
                             if cursor.PointerShapeInfo.Type == 1: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME
-                                #todo
-                                scursor = None
+                                h = int(cursor.PointerShapeInfo.Height/2)
+                                bcursor = convert_monochrome_to_rgba(cursor.Shape, cursor.PointerShapeInfo.Width ,h)
+                                scursor = pygame.image.frombuffer(bcursor,(cursor.PointerShapeInfo.Width , h),"BGRA")
+                                window.blit(scursor, (cursor_x,cursor_y))
                             elif cursor.PointerShapeInfo.Type == 2: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR
                                 scursor = pygame.image.frombuffer(cursor.Shape,(cursor.PointerShapeInfo.Width , cursor.PointerShapeInfo.Height),"BGRA")
                                 window.blit(scursor, (cursor_x,cursor_y))
+                            else: #unhandled DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR
+                                pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
                     except Exception as e:
                         # Draw "cursor"
                         pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
-                        print("cursor error:",e)
+                        print("cursor error:",e, traceback.format_exc())
 
                 pygame.display.flip()               
                 clock.tick(fpslimit)
