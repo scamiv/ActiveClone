@@ -19,6 +19,7 @@ options:
   --fps FPS          FPS limit (Default 60)
   --show_fps          Show FPS
 ```
+Toggeling ScollLock on will confine the cursor to the current screen.
 
 ## State of Project
 
