@@ -11,6 +11,7 @@ import pygame
 import re
 import win32gui
 import win32con
+import win32api
 
 import traceback
 import numpy as np
@@ -96,6 +97,28 @@ def build_monitors(dxcam_output_info):
         r.append((device_idx, output_idx, szDevice, width, height, is_primary))
     return r
 
+cursorlock_on = False
+def pointInRect(rect,point):
+    margin = 5
+    if (rect.left+margin <= point.x <= rect.right-margin):
+        if (rect.top+margin <= point.y <= rect.bottom-margin):
+            return True
+    return False
+
+def cursorLocker(monitor_handle):
+    global cursorlock_on
+    SLstate = win32api.GetKeyState(win32con.VK_SCROLL)
+    if SLstate == 0:
+        if cursorlock_on == True:
+            win32api.ClipCursor()
+        cursorlock_on = False
+    elif SLstate == -127: #toggled on
+        monitorinfo = get_monitor_info(monitor_handle)
+        windll.user32.ClipCursor(monitorinfo.rcMonitor)
+        cursorlock_on = True
+    elif SLstate == -128: #toggled off
+        win32api.ClipCursor()
+
 monitors = build_monitors(dxcam.output_info())
 print(*enumerate(monitors), sep='\n')
 
@@ -130,6 +153,7 @@ try:
         # Get the current cursor position to determine the active monitor
         cursor_pos, cursor_visible = GetCursorInfo_win32gui()
         monitor_handle = windll.user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle       
+        cursorLocker(monitor_handle)
         active_monitor = monitor_id_from_hmonitor(monitor_handle)
 
         if active_monitor is not None:
