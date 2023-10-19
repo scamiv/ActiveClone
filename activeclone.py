@@ -15,9 +15,9 @@ import win32con
 import traceback
 import numpy as np
 
-from ctypes import windll, Structure, c_ulong, c_wchar, byref,c_long, sizeof
+from ctypes import windll, Structure, c_ulong, c_wchar, byref, c_long, sizeof
 from ctypes.wintypes import RECT, POINT
-    
+
 from functools import cache
 
 import argparse
@@ -112,14 +112,12 @@ show_fps = args.show_fps
 
 # setup pygame/window
 pygame.init()
-#pygameFlags = pygame.NOFRAME | pygame.OPENGL | pygame.FULLSCREEN | pygame.SCALED
 pygameFlags = pygame.NOFRAME | pygame.HWSURFACE| pygame.FULLSCREEN | pygame.SCALED 
 window = pygame.display.set_mode((monitors[output_display][3], monitors[output_display][4]), pygameFlags , display=output_display,vsync=0)
 win32gui.SetWindowPos(pygame.display.get_wm_info()['window'], win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 clock = pygame.time.Clock()
 pygame.font.init()
 font = pygame.font.SysFont('lucidaconsole', 10)
-
 
 # Initialize dxcam for each display
 cameras = []
@@ -131,8 +129,8 @@ try:
     while True:
         # Get the current cursor position to determine the active monitor
         cursor_pos, cursor_visible = GetCursorInfo_win32gui()
-        monitor_id = windll.user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle
-        active_monitor = monitor_id_from_hmonitor(monitor_id)
+        monitor_handle = windll.user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle       
+        active_monitor = monitor_id_from_hmonitor(monitor_handle)
 
         if active_monitor is not None:
             frame = cameras[active_monitor].grab()  # grab frame from active_monitor 
@@ -146,10 +144,6 @@ try:
                 if (frame_width, frame_height) != window.get_size():
                     window = pygame.display.set_mode((frame_width, frame_height), pygameFlags , display=output_display,vsync=0)
 
-                monitorinfo = get_monitor_info(monitor_id)
-                monitor_width = monitorinfo.rcMonitor.right - monitorinfo.rcMonitor.left
-                monitor_height = monitorinfo.rcMonitor.bottom - monitorinfo.rcMonitor.top
-
                 # Create a pygame surface from the frame
                 #frame_surface = pygame.surfarray.make_surface(frame.transpose(1, 0, 2)) #slow
                 #pygame.surfarray.blit_array(window,frame.transpose(1, 0, 2)) #better but still slow
@@ -159,12 +153,9 @@ try:
                 if show_fps:
                     text_surface = font.render(str(int(clock.get_fps())), True, "White")
                     window.blit(text_surface, (3,15))
-                
+
                 #draw cursor?
                 if  cursor_visible == True:
-                    # Calculate the cursor position relative to the active monitor's top/left
-                    #cursor_x = cursor_pos.x - monitorinfo.rcMonitor.left
-                    #cursor_y = cursor_pos.y - monitorinfo.rcMonitor.top
                     cursor_x = cursor.PointerPositionInfo.Position.x
                     cursor_y = cursor.PointerPositionInfo.Position.y
                     try:
@@ -185,7 +176,7 @@ try:
                         pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
                         print("cursor error:",e, traceback.format_exc())
 
-                pygame.display.flip()               
+                pygame.display.flip()      
                 clock.tick(fpslimit)
 
 
@@ -199,7 +190,6 @@ try:
 except KeyboardInterrupt:
     pass
 
-# Clean up
 for camera in cameras:
     camera.release()
 pygame.quit()
