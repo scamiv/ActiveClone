@@ -24,6 +24,7 @@ from functools import cache
 
 import argparse
 
+import time
 class MONITORINFOEXW(Structure):
     _fields_ = [
         ("cbSize", c_ulong),
@@ -72,10 +73,11 @@ def convert_monochrome_to_rgba(hbmMask, width, height):
     and_vals = (input[byte_indices] >> bit_positions) & 1
     xor_vals = (input[byte_indices + length // 8] >> bit_positions) & 1
     rgba_output = np.zeros((length, 4), dtype=np.uint8)
+    sub_output = np.zeros((length, 4), dtype=np.uint8)
     rgba_output[np.logical_and(and_vals == 0 , xor_vals == 0)] = [0, 0, 0, 255]     
     rgba_output[np.logical_and(and_vals == 0 , xor_vals == 1)] = [255, 255, 255, 255]  
-    rgba_output[np.logical_and(and_vals == 1 , xor_vals == 1)] = [0, 0, 255, 255]     #"inverted"
-    return rgba_output
+    sub_output[np.logical_and(and_vals == 1 , xor_vals == 1)] = [255, 255, 255, 255]     #"inverted"
+    return (rgba_output,sub_output)
 
 def build_monitors(dxcam_output_info):
     pattern = r'Device\[(\d+)\] Output\[(\d+)\]: szDevice\[(.+?)\]: Res:\((\d+), (\d+)\) Rot:\d+ Primary:(\w+)'
@@ -104,7 +106,7 @@ print(*enumerate(monitors), sep='\n')
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--display", type=int, default=1, help="Output display number")
-parser.add_argument("--fps", type=int, default=60, help="FPS limit (Default 60)")
+parser.add_argument("--fps", type=int, default=60, help="FPS limit (Default 60) 0 to disable")
 parser.add_argument("--show_fps", action="store_true", help="Show FPS")
 args = parser.parse_args()
 parser.print_help()
@@ -115,29 +117,51 @@ show_fps = args.show_fps
 
 # setup pygame/window
 pygame.init()
-pygameFlags = pygame.NOFRAME | pygame.HWSURFACE| pygame.FULLSCREEN | pygame.SCALED 
+pygameFlags = pygame.NOFRAME |  pygame.FULLSCREEN | pygame.HWSURFACE | pygame.SCALED #crashy without scaled??
 window = pygame.display.set_mode((monitors[output_display][3], monitors[output_display][4]), pygameFlags , display=output_display,vsync=0)
 win32gui.SetWindowPos(pygame.display.get_wm_info()['window'], win32con.HWND_TOPMOST, 0, 0, 0, 0, win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 clock = pygame.time.Clock()
+last_frame_update = time.perf_counter_ns()
 pygame.font.init()
 font = pygame.font.SysFont('lucidaconsole', 10)
 
 # Initialize dxcam for each display
-cameras = []
-for device_idx, output_idx, _, _, _, _ in monitors:
-    camera = dxcam.create(device_idx=device_idx, output_idx=output_idx, output_color="BGRA")
-    cameras.append(camera)
+cameras = {}
+for i, (device_idx, output_idx, _, _, _, _) in enumerate(monitors):
+    cameras[i] = dxcam.create(device_idx=device_idx, output_idx=output_idx, output_color="BGRA")
+    #cameras.append(camera)
 
 cursorcache = {}
+def get_cursor_image(cursor,hcursor):
+    if cursor.Shape is not None:          
+        if hcursor not in cursorcache:
+            scursor_i=None
+            h=int(cursor.PointerShapeInfo.Height)
+            w=int(cursor.PointerShapeInfo.Width)
+            if cursor.PointerShapeInfo.Type == 1:  #DXGI_OUTDUPL_POINTER_SHAPE_TYPE DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME
+                h = int(cursor.PointerShapeInfo.Height/2)
+                bcursor,bcursor_invert = convert_monochrome_to_rgba(cursor.Shape, w,h)
+                scursor = pygame.image.frombuffer(bcursor,(w , h),"BGRA")
+                scursor_i = pygame.image.frombuffer(bcursor_invert,(w , h),"BGRA")#,(0,0),None, pygame.BLEND_RGBA_SUB
+                scoffset= cursor.PointerShapeInfo.HotSpot
+            elif cursor.PointerShapeInfo.Type == 2: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR
+                scursor = pygame.image.frombuffer(cursor.Shape,(w , h),"BGRA")
+                scoffset= cursor.PointerShapeInfo.HotSpot
+            else: #unhandled DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR
+                scursor = pygame.Surface((4, 4))
+                scursor.draw.rect(window, (255, 0, 0), (0, 0, 4, 4))
+                scoffset= POINT(2,2)
+            cursorcache[hcursor]={"Surface":scursor,"Offset": scoffset,"Inverted":scursor_i,"Size":(w , h)}
+        return cursorcache[hcursor]
 
-grab_shot=True #sadly not much of a difference
+grab_shot=False #sadly not much of a difference
+s_cursor_background = pygame.Surface((16,16))
 try:
     while True:
         # Get the current cursor position to determine the active monitor
         cursor_pos, cursor_visible, hcursor = GetCursorInfo_win32gui()
         monitor_handle = windll.user32.MonitorFromPoint(cursor_pos, MONITOR_DEFAULTTONEAREST)  # returns monitor handle       
         cursorLocker(monitor_handle)
-        
         active_monitor = monitor_id_from_hmonitor(monitor_handle)
         frame_width,frame_height =(monitors[active_monitor][3], monitors[active_monitor][4])
         if (frame_width, frame_height) != window.get_size():
@@ -147,9 +171,10 @@ try:
             frame = cameras[active_monitor].grab()
             if frame is not None:
                 window.get_buffer().write(frame,0)
+                last_frame_update = time.perf_counter_ns()
         else:
-            cameras[active_monitor].shot(window._pixels_address)
-        
+            if cameras[active_monitor].shot(window._pixels_address) is not None:
+                last_frame_update = time.perf_counter_ns()
         cursor = cameras[active_monitor].grab_cursor() 
 
         # Create a pygame surface from the frame
@@ -159,36 +184,32 @@ try:
         
         #draw fps
         if show_fps:
-            text_surface = font.render(str(int(clock.get_fps())), True, "White", "Black")
-            window.blit(text_surface, (3,15))
+            s_main_fps = font.render(str(int(clock.get_fps())), True, "White", "Black")
+            update_fps = min(1.0 /((time.perf_counter_ns()-last_frame_update)/ 1e9) , clock.get_fps())
+            s_update_fps = font.render(str(update_fps), True, "White", "Black")
+            window.blits(blit_sequence=((s_main_fps, (3,15)),(s_update_fps, (3,30))))
+            #window.blit(main_fps, (3,15))
+
 
         #draw cursor?
         if  cursor_visible == True:
-            cursor_x = cursor.PointerPositionInfo.Position.x #from capture position
-            cursor_y = cursor.PointerPositionInfo.Position.y
-            #monitorinfo = get_monitor_info(monitor_handle)
-            #cursor_x = cursor_pos.x - monitorinfo.rcMonitor.left #from latest GetCursorInfo, needs to handle hotspot
-            #cursor_y = cursor_pos.y - monitorinfo.rcMonitor.top
-            try:
-                if cursor.Shape is not None:          
-                    if hcursor not in cursorcache.keys():
-                        if cursor.PointerShapeInfo.Type == 1:  #DXGI_OUTDUPL_POINTER_SHAPE_TYPE DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME
-                            h = int(cursor.PointerShapeInfo.Height/2)
-                            bcursor = convert_monochrome_to_rgba(cursor.Shape, cursor.PointerShapeInfo.Width ,h)
-                            scursor = pygame.image.frombuffer(bcursor,(cursor.PointerShapeInfo.Width , h),"BGRA")
-                        elif cursor.PointerShapeInfo.Type == 2: #DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR
-                            scursor = pygame.image.frombuffer(cursor.Shape,(cursor.PointerShapeInfo.Width , cursor.PointerShapeInfo.Height),"BGRA")
-                        else: #unhandled DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR
-                            scursor = pygame.Surface((4, 4))
-                            scursor.draw.rect(window, (255, 0, 0), (0, 0, 4, 4))
-                        cursorcache[hcursor]=scursor
-                window.blit(cursorcache[hcursor], (cursor_x,cursor_y))
-            except Exception as e:
-                # Draw "cursor"
-                pygame.draw.rect(window, (255, 0, 0), (cursor_x - 2, cursor_y - 2, 4, 4))
-                print("cursor error:",e, traceback.format_exc())
+            #cursor_x = cursor.PointerPositionInfo.Position.x #from capture position, has problems when dragging
+            #cursor_y = cursor.PointerPositionInfo.Position.y
+            monitorinfo = get_monitor_info(monitor_handle)
 
-        pygame.display.flip()      
+            cursor_surface = get_cursor_image(cursor,hcursor)
+            cursor_x = cursor_pos.x - monitorinfo.rcMonitor.left - cursor_surface["Offset"].x
+            cursor_y = cursor_pos.y - monitorinfo.rcMonitor.top - cursor_surface["Offset"].y
+
+            s_cursor_background = pygame.Surface((cursor_surface["Size"][0],cursor_surface["Size"][1]))
+            s_cursor_background.blit(window, (0, 0), (cursor_x,cursor_y,cursor_surface["Size"][0],cursor_surface["Size"][1]))
+
+            if  cursor_surface["Inverted"] is not None:
+                window.blit(cursor_surface["Inverted"], (cursor_x, cursor_y),None, pygame.BLEND_RGBA_SUB) #todo use 
+            window.blit(cursor_surface["Surface"], (cursor_x, cursor_y ))
+
+        pygame.display.flip()
+        window.blit(s_cursor_background, (cursor_x, cursor_y ))  #delete cursor from fb
         clock.tick(fpslimit)
 
 
@@ -202,6 +223,6 @@ try:
 except KeyboardInterrupt:
     pass
 
-for camera in cameras:
+for i, camera in cameras.items():
     camera.release()
 pygame.quit()
